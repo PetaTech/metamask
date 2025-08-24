@@ -10,4 +10,3 @@ eth-hash==0.5.2
 eth-utils==2.2.2
 flask-cors==4.0.0
 pycryptodome==3.23.0
-pysha3==1.0.2

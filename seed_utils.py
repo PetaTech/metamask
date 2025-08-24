@@ -4,11 +4,13 @@ import time
 import threading
 import hmac
 import struct
+import json
+import requests
 from typing import List, Optional
 from mnemonic import Mnemonic
-from web3 import Web3
 import ecdsa
-from eth_keys import keys
+from eth_hash.auto import keccak
+from eth_utils import to_checksum_address
 
 # No rate limiting needed - using direct blockchain nodes!
 
@@ -58,11 +60,14 @@ class SeedGenerator:
             final_private_key = private_key_int.to_bytes(32, 'big')
             
             # Generate public key using secp256k1
-            private_key_obj = keys.PrivateKey(final_private_key)
-            public_key = private_key_obj.public_key
+            sk = ecdsa.SigningKey.from_string(final_private_key, curve=ecdsa.SECP256k1)
+            vk = sk.get_verifying_key()
+            public_key_bytes = vk.to_string()  # 64 bytes uncompressed
             
-            # Get Ethereum address from public key
-            address = public_key.to_checksum_address()
+            # Generate Ethereum address from public key
+            # Ethereum address = last 20 bytes of keccak256(public_key)
+            address_bytes = keccak(public_key_bytes)[-20:]
+            address = to_checksum_address(address_bytes)
             
             return address
             
@@ -70,9 +75,9 @@ class SeedGenerator:
             raise Exception(f"Failed to derive Ethereum address from seed: {e}")
     
     
-    def _get_web3_connection(self):
-        """Get or create Web3 connection using only direct blockchain nodes"""
-        if self.w3 is None:
+    def _get_rpc_endpoint(self):
+        """Get a working RPC endpoint using direct HTTP requests"""
+        if not hasattr(self, 'rpc_endpoint') or self.rpc_endpoint is None:
             # Multiple public blockchain endpoints (no API keys, no rate limits!)
             direct_endpoints = [
                 "https://ethereum.publicnode.com",                    # PublicNode
@@ -83,7 +88,6 @@ class SeedGenerator:
                 "https://cloudflare-eth.com",                        # Cloudflare
                 "https://main-light.eth.linkpool.io",               # LinkPool
                 "https://rpc.flashbots.net",                        # Flashbots
-                "https://eth-mainnet.nodereal.io/v1/1659dfb40aa24bbb8153a677b98064d7",  # NodeReal
             ]
             
             print(f"🔗 Trying {len(direct_endpoints)} direct blockchain endpoints...")
@@ -91,16 +95,22 @@ class SeedGenerator:
             # Try each endpoint until one works
             for i, endpoint in enumerate(direct_endpoints, 1):
                 try:
-                    print(f"[{i}/{len(direct_endpoints)}] Connecting to {endpoint}...")
-                    test_w3 = Web3(Web3.HTTPProvider(endpoint, request_kwargs={'timeout': 10}))
+                    print(f"[{i}/{len(direct_endpoints)}] Testing {endpoint}...")
                     
-                    # Test connection with a simple call
-                    test_w3.eth.get_block('latest')
+                    # Test with a simple JSON-RPC call
+                    payload = {
+                        "jsonrpc": "2.0",
+                        "method": "eth_blockNumber", 
+                        "params": [],
+                        "id": 1
+                    }
                     
-                    self.w3 = test_w3
-                    print(f"✅ SUCCESS: Connected to {endpoint}")
-                    print(f"🚀 MAXIMUM SPEED: No rate limits, direct blockchain access!")
-                    return self.w3
+                    response = requests.post(endpoint, json=payload, timeout=10)
+                    if response.status_code == 200 and 'result' in response.json():
+                        self.rpc_endpoint = endpoint
+                        print(f"✅ SUCCESS: Connected to {endpoint}")
+                        print(f"🚀 MAXIMUM SPEED: Direct JSON-RPC, no rate limits!")
+                        return self.rpc_endpoint
                     
                 except Exception as e:
                     print(f"❌ Failed {endpoint}: {str(e)[:100]}...")
@@ -111,19 +121,45 @@ class SeedGenerator:
             print(f"🔧 Check your internet connection or try again later.")
             return None
             
-        return self.w3 if self.w3 and self.w3.is_connected() else None
+        return self.rpc_endpoint
+    
+    def _rpc_call(self, method: str, params: list):
+        """Make direct JSON-RPC call to Ethereum node"""
+        endpoint = self._get_rpc_endpoint()
+        if not endpoint:
+            return None
+            
+        payload = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+            "id": 1
+        }
+        
+        try:
+            response = requests.post(endpoint, json=payload, timeout=15)
+            if response.status_code == 200:
+                result = response.json()
+                return result.get('result')
+            return None
+        except Exception as e:
+            print(f"RPC call failed: {e}")
+            return None
     
     def has_transaction_history(self, address: str) -> bool:
-        """Check if address has any outgoing transactions - MAXIMUM SPEED with direct blockchain access"""
+        """Check if address has any outgoing transactions - MAXIMUM SPEED with direct JSON-RPC"""
         try:
-            w3 = self._get_web3_connection()
-            if not w3:
-                return False
-            
             # Convert to checksum address to avoid EIP-55 errors
-            checksum_address = w3.to_checksum_address(address)
-            # Get transaction count (nonce) - direct blockchain query, no rate limits!
-            tx_count = w3.eth.get_transaction_count(checksum_address)
+            checksum_address = to_checksum_address(address)
+            
+            # Direct JSON-RPC call to get transaction count
+            tx_count_hex = self._rpc_call("eth_getTransactionCount", [checksum_address, "latest"])
+            
+            if tx_count_hex is None:
+                return False
+                
+            # Convert hex to int
+            tx_count = int(tx_count_hex, 16)
             return tx_count > 0  # True if address has sent transactions
             
         except Exception as e:
@@ -131,31 +167,39 @@ class SeedGenerator:
             return False
     
     def get_transaction_count(self, address: str) -> int:
-        """Get transaction count for address - MAXIMUM SPEED direct blockchain access"""
+        """Get transaction count for address - MAXIMUM SPEED direct JSON-RPC"""
         try:
-            w3 = self._get_web3_connection()
-            if not w3:
-                return 0
-            
             # Convert to checksum address to avoid EIP-55 errors
-            checksum_address = w3.to_checksum_address(address)
-            return w3.eth.get_transaction_count(checksum_address)
+            checksum_address = to_checksum_address(address)
+            
+            # Direct JSON-RPC call to get transaction count
+            tx_count_hex = self._rpc_call("eth_getTransactionCount", [checksum_address, "latest"])
+            
+            if tx_count_hex is None:
+                return 0
+                
+            # Convert hex to int
+            return int(tx_count_hex, 16)
             
         except Exception as e:
             print(f"Error getting transaction count: {e}")
             return 0
     
     def get_balance(self, address: str) -> float:
-        """Get ETH balance for address - MAXIMUM SPEED direct blockchain access"""
+        """Get ETH balance for address - MAXIMUM SPEED direct JSON-RPC"""
         try:
-            w3 = self._get_web3_connection()
-            if not w3:
-                return 0.0
-            
             # Convert to checksum address to avoid EIP-55 errors
-            checksum_address = w3.to_checksum_address(address)
-            balance_wei = w3.eth.get_balance(checksum_address)
-            balance_eth = w3.from_wei(balance_wei, 'ether')
+            checksum_address = to_checksum_address(address)
+            
+            # Direct JSON-RPC call to get balance
+            balance_hex = self._rpc_call("eth_getBalance", [checksum_address, "latest"])
+            
+            if balance_hex is None:
+                return 0.0
+                
+            # Convert hex wei to ETH
+            balance_wei = int(balance_hex, 16)
+            balance_eth = balance_wei / 10**18  # Convert wei to ETH
             return float(balance_eth)
             
         except Exception as e:

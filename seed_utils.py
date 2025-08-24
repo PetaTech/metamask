@@ -9,8 +9,13 @@ import requests
 from typing import List, Optional
 from mnemonic import Mnemonic
 import ecdsa
-from eth_hash.auto import keccak
 from eth_utils import to_checksum_address
+
+# Explicitly use pycryptodome backend for keccak
+try:
+    from eth_hash.backends.pycryptodome import keccak
+except ImportError:
+    from eth_hash.auto import keccak
 
 # No rate limiting needed - using direct blockchain nodes!
 

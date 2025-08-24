@@ -236,6 +236,38 @@ def run_brute_force_attack(max_attempts_per_cycle: int = 2048, detection_method:
     finally:
         attack_state["is_running"] = False
 
+@app.route('/', methods=['GET'])
+@app.route('/docs', methods=['GET'])
+def api_documentation():
+    """Simple API documentation"""
+    return jsonify({
+        "name": "MetaMask Seed Brute Force API",
+        "description": "Flask API for testing partial seed brute-force attacks",
+        "version": "1.0.0",
+        "endpoints": {
+            "GET /health": "Health check",
+            "GET /attack/status": "Get current attack status",
+            "POST /attack/start": "Start brute force attack",
+            "POST /attack/stop": "Stop current attack", 
+            "POST /test/compare-balance-vs-txcount": "Compare detection methods"
+        },
+        "example_requests": {
+            "start_attack": {
+                "url": "POST /attack/start",
+                "body": {
+                    "detection_method": "transactions",
+                    "max_attempts_per_cycle": 2048
+                }
+            },
+            "test_methods": {
+                "url": "POST /test/compare-balance-vs-txcount", 
+                "body": {
+                    "address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+                }
+            }
+        }
+    })
+
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""

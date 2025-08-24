@@ -13,7 +13,9 @@ from eth_utils import to_checksum_address
 
 # Explicitly use pycryptodome backend for keccak
 try:
-    from eth_hash.backends.pycryptodome import keccak
+    from Crypto.Hash import keccak as crypto_keccak
+    def keccak(data):
+        return crypto_keccak.new(digest_bits=256).update(data).digest()
 except ImportError:
     from eth_hash.auto import keccak
 

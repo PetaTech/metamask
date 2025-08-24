@@ -1,11 +1,11 @@
-fastapi==0.95.2
-uvicorn==0.22.0
+flask==3.0.0
+gunicorn==21.2.0
 motor==3.1.2
 pymongo==4.3.3
 requests==2.31.0
 mnemonic==0.20
 python-dotenv==1.0.0
-pydantic==1.10.7
 ecdsa==0.18.0
 eth-hash==0.5.2
 eth-utils==2.2.2
+flask-cors==4.0.0

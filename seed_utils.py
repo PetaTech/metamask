@@ -11,13 +11,12 @@ from mnemonic import Mnemonic
 import ecdsa
 from eth_utils import to_checksum_address
 
-# Explicitly use pycryptodome backend for keccak
-try:
-    from Crypto.Hash import keccak as crypto_keccak
-    def keccak(data):
-        return crypto_keccak.new(digest_bits=256).update(data).digest()
-except ImportError:
-    from eth_hash.auto import keccak
+# Use pycryptodome directly for keccak hashing
+from Crypto.Hash import keccak as crypto_keccak
+
+def keccak(data):
+    """Keccak-256 hash function using pycryptodome"""
+    return crypto_keccak.new(digest_bits=256).update(data).digest()
 
 # No rate limiting needed - using direct blockchain nodes!
 
@@ -73,8 +72,12 @@ class SeedGenerator:
             
             # Generate Ethereum address from public key
             # Ethereum address = last 20 bytes of keccak256(public_key)
-            address_bytes = keccak(public_key_bytes)[-20:]
-            address = to_checksum_address(address_bytes)
+            try:
+                keccak_hash = keccak(public_key_bytes)
+                address_bytes = keccak_hash[-20:]
+                address = to_checksum_address(address_bytes)
+            except Exception as hash_error:
+                raise Exception(f"Keccak hashing failed: {hash_error}")
             
             return address
             

@@ -1,7 +1,6 @@
 import asyncio
 from typing import Optional, List, Dict, Any
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase, AsyncIOMotorCollection
-from pydantic import BaseModel
 import os
 from datetime import datetime
 from dotenv import load_dotenv
@@ -9,12 +8,14 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-class SeedMatch(BaseModel):
-    seed_phrase: str
-    address: str
-    balance: float
-    timestamp: datetime
-    attempts_made: int
+class SeedMatch:
+    """Simple data class for seed matches (replacing Pydantic)"""
+    def __init__(self, seed_phrase: str, address: str, balance: float, timestamp: datetime, attempts_made: int):
+        self.seed_phrase = seed_phrase
+        self.address = address
+        self.balance = balance
+        self.timestamp = timestamp
+        self.attempts_made = attempts_made
 
 class DatabaseManager:
     def __init__(self, connection_string: str = None):

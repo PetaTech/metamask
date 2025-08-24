@@ -226,6 +226,28 @@ def run_brute_force_attack(max_attempts_per_cycle: int = 2048, detection_method:
             print(f"[{datetime.utcnow().strftime('%H:%M:%S')}] Cycle {cycle} completed: {cycle_attempts} attempts, {attack_state['matches_found']} total matches found")
             print(f"[{datetime.utcnow().strftime('%H:%M:%S')}] Total attempts so far: {attack_state['total_attempts']}")
             
+            # Store cycle statistics in database
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                cycle_stats = {
+                    "cycle_number": cycle,
+                    "base_seed": base_seed,
+                    "total_attempts": cycle_attempts,
+                    "valid_seeds": cycle_attempts,  # All attempts are valid seeds in this method
+                    "addresses_with_activity": cycle_addresses_with_activity,
+                    "timestamp": datetime.utcnow(),
+                    "session_total_attempts": attack_state["total_attempts"]
+                }
+                
+                loop.run_until_complete(db_manager.store_cycle_stats(cycle_stats))
+                loop.close()
+                print(f"[{datetime.utcnow().strftime('%H:%M:%S')}] Cycle {cycle} statistics stored in database")
+                
+            except Exception as e:
+                print(f"Error storing cycle statistics: {e}")
+            
             # Small delay between cycles
             time.sleep(0.5)
         
@@ -300,14 +322,42 @@ def stop_attack():
 
 @app.route('/attack/status', methods=['GET'])
 def get_attack_status():
-    """Get current attack status"""
-    return jsonify({
-        "is_running": attack_state["is_running"],
-        "current_cycle": attack_state["current_cycle"],
-        "total_attempts": attack_state["total_attempts"],
-        "matches_found": attack_state["matches_found"],
-        "current_seed": attack_state["current_seed"]
-    })
+    """Get current attack status with overall statistics"""
+    try:
+        # Get database statistics
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        balance_stats = loop.run_until_complete(db_manager.get_balance_statistics())
+        recent_cycles = loop.run_until_complete(db_manager.get_recent_cycles(5))
+        
+        loop.close()
+        
+        return jsonify({
+            "attack_status": {
+                "is_running": attack_state["is_running"],
+                "current_cycle": attack_state["current_cycle"],
+                "total_attempts": attack_state["total_attempts"],
+                "matches_found": attack_state["matches_found"],
+                "current_seed": attack_state["current_seed"]
+            },
+            "overall_statistics": balance_stats,
+            "recent_cycles": recent_cycles
+        })
+        
+    except Exception as e:
+        # Fallback to basic status if database unavailable
+        return jsonify({
+            "attack_status": {
+                "is_running": attack_state["is_running"],
+                "current_cycle": attack_state["current_cycle"],
+                "total_attempts": attack_state["total_attempts"],
+                "matches_found": attack_state["matches_found"],
+                "current_seed": attack_state["current_seed"]
+            },
+            "overall_statistics": {"error": str(e)},
+            "recent_cycles": []
+        })
 
 @app.route('/test/compare-balance-vs-txcount', methods=['POST'])
 def compare_methods():

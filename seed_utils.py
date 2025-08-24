@@ -4,9 +4,9 @@ import time
 import threading
 from typing import List, Optional
 from mnemonic import Mnemonic
-from hdwallet import HDWallet
-from hdwallet.symbols import ETH
 from web3 import Web3
+from eth_account import Account
+import bip32
 
 # No rate limiting needed - using direct blockchain nodes!
 
@@ -31,39 +31,27 @@ class SeedGenerator:
         return self.mnemo.check(seed)
     
     def seed_to_address(self, seed: str) -> str:
-        """Convert seed phrase to Ethereum address"""
+        """Convert seed phrase to Ethereum address using pure Python"""
         if not self.validate_seed(seed):
             raise ValueError("Invalid seed phrase")
             
         try:
-            # Create HD wallet from seed
-            hdwallet = HDWallet(symbol=ETH)
-            hdwallet.from_mnemonic(mnemonic=seed)
-            hdwallet.from_path("m/44'/60'/0'/0/0")  # Standard Ethereum derivation path
+            # Convert mnemonic to seed bytes
+            seed_bytes = self.mnemo.to_seed(seed)
             
-            # Try different address methods
-            if hasattr(hdwallet, 'address'):
-                return hdwallet.address()
-            elif hasattr(hdwallet, 'p2pkh_address'):
-                return hdwallet.p2pkh_address()
-            elif hasattr(hdwallet, 'ethereum_address'):
-                return hdwallet.ethereum_address()
-            else:
-                # If none work, let's see what methods are available
-                methods = [method for method in dir(hdwallet) if 'address' in method.lower()]
-                raise AttributeError(f"No address method found. Available methods: {methods}")
-                
+            # Create BIP32 master key
+            master_key = bip32.BIP32.from_seed(seed_bytes)
+            
+            # Derive Ethereum key using standard path m/44'/60'/0'/0/0
+            eth_path = "m/44'/60'/0'/0/0"
+            derived_key = master_key.get_privkey_from_path(eth_path)
+            
+            # Create Ethereum account from private key
+            account = Account.from_key(derived_key)
+            return account.address
+            
         except Exception as e:
-            print(f"Error in seed_to_address: {e}")
-            # Fallback: try to get address directly from private key using Web3
-            try:
-                from eth_account import Account
-                # Get private key from hdwallet
-                private_key = hdwallet.private_key()
-                account = Account.from_key(private_key)
-                return account.address
-            except Exception as e2:
-                raise Exception(f"Failed to derive address: {e}, Fallback failed: {e2}")
+            raise Exception(f"Failed to derive Ethereum address from seed: {e}")
     
     
     def _get_web3_connection(self):
